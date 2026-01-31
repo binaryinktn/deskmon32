@@ -4,7 +4,7 @@ DeskMon32 is an open-source PC system statistics monitor for small TFT displays.
 
 **Preview:**
 
-![Project Image](images/picture.jpg)
+![Project Image](picture.jpg)
 
 **PlatformIO Quick Start**
 - **Requirements:** Install the PlatformIO VS Code extension or the PlatformIO Core CLI.
