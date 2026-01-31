@@ -182,7 +182,7 @@ void setup() {
     Serial.begin(9600);
     aroma_ui_init();
 
-    AromaTheme theme = aroma_theme_create_material_orange_dark();
+    AromaTheme theme = aroma_theme_create_material_black();
     theme.colors.primary = 0xFF0000;
     //theme.colors.background = 0x000000;
     //theme.colors.text_primary = 0xFFFFFF;
