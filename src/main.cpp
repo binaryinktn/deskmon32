@@ -19,9 +19,6 @@
  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-
-
-#include "BluetoothSerial.h"
 #include "aroma.h"
 #include <Arduino.h>
 #include "backends/aroma_abi.h"
@@ -38,21 +35,29 @@
 #define SECTION_SPACING 30  
 
 #pragma pack(push, 1)
-struct MetricPacket {
+typedef struct {
     uint8_t header[2];
     float current_cpu_usage;
     float current_ram_usage;
+    float current_gpu_fan_speed;
+    float current_gpu_utilisation;
     uint32_t timestamp;
-};
+} MetricPacket;
 #pragma pack(pop)
 
 MetricPacket rx_packet;
 bool packet_ready = false;
 AromaWindow* window = NULL;
+
+// UI Elements
 AromaLabel* cpu_label = NULL;
 AromaProgressBar* cpu_usage = NULL;
 AromaLabel* ram_label = NULL;
 AromaProgressBar* ram_usage = NULL;
+AromaLabel* gpu_fan_label = NULL;
+AromaProgressBar* gpu_fan_speed = NULL;
+AromaLabel* gpu_util_label = NULL;
+AromaProgressBar* gpu_utilisation = NULL;
 AromaLabel* status_label = NULL;
 AromaLabel* timestamp_label = NULL;
 
@@ -60,6 +65,8 @@ uint32_t packet_count = 0;
 uint32_t last_received_time = 0;
 float last_cpu_value = 0.0f;
 float last_ram_value = 0.0f;
+float last_gpu_fan_value = 0.0f;
+float last_gpu_util_value = 0.0f;
 
 int calculateYPosition(int widgetIndex) {
     return MARGIN_Y + (widgetIndex * (LABEL_HEIGHT + PROGRESS_HEIGHT + VERTICAL_SPACING));
@@ -88,8 +95,7 @@ void receive_packets() {
                     index = 2;
                     state = DATA;
                 } else {
-                    state = SYNC1; 
-
+                    state = SYNC1;
                 }
                 break;
 
@@ -98,26 +104,31 @@ void receive_packets() {
                     buffer[index++] = byte;
 
                     if (index >= sizeof(MetricPacket)) {
-
                         memcpy(&rx_packet, buffer, sizeof(MetricPacket));
 
+                        // Validate received data
                         if (rx_packet.current_cpu_usage >= 0.0f && 
                             rx_packet.current_cpu_usage <= 100.0f &&
                             rx_packet.current_ram_usage >= 0.0f && 
-                            rx_packet.current_ram_usage <= 100.0f) {
+                            rx_packet.current_ram_usage <= 100.0f &&
+                            rx_packet.current_gpu_fan_speed >= 0.0f && 
+                            rx_packet.current_gpu_fan_speed <= 100.0f &&
+                            rx_packet.current_gpu_utilisation >= 0.0f && 
+                            rx_packet.current_gpu_utilisation <= 100.0f) {
 
                             packet_ready = true;
                             packet_count++;
                             last_received_time = millis();
                             last_cpu_value = rx_packet.current_cpu_usage;
                             last_ram_value = rx_packet.current_ram_usage;
+                            last_gpu_fan_value = rx_packet.current_gpu_fan_speed;
+                            last_gpu_util_value = rx_packet.current_gpu_utilisation;
                         }
 
                         index = 0;
                         state = SYNC1;
                     }
                 } else {
-
                     index = 0;
                     state = SYNC1;
                 }
@@ -129,14 +140,10 @@ void receive_packets() {
 void update_ui() {
     if (!packet_ready) return;
 
+    // Update CPU
     if (cpu_usage) {
         float cpu_percent = rx_packet.current_cpu_usage / 100.0f;
         aroma_progressbar_set_progress((AromaNode*)cpu_usage, cpu_percent);
-    }
-
-    if (ram_usage) {
-        float ram_percent = rx_packet.current_ram_usage / 100.0f;
-        aroma_progressbar_set_progress((AromaNode*)ram_usage, ram_percent);
     }
 
     if (cpu_label) {
@@ -145,12 +152,43 @@ void update_ui() {
         aroma_label_set_text((AromaNode*)cpu_label, cpu_text);
     }
 
+    // Update RAM
+    if (ram_usage) {
+        float ram_percent = rx_packet.current_ram_usage / 100.0f;
+        aroma_progressbar_set_progress((AromaNode*)ram_usage, ram_percent);
+    }
+
     if (ram_label) {
         char ram_text[32];
         snprintf(ram_text, sizeof(ram_text), "RAM Usage: %.1f%%", rx_packet.current_ram_usage);
         aroma_label_set_text((AromaNode*)ram_label, ram_text);
     }
 
+    // Update GPU Fan Speed
+    if (gpu_fan_speed) {
+        float fan_percent = rx_packet.current_gpu_fan_speed / 100.0f;
+        aroma_progressbar_set_progress((AromaNode*)gpu_fan_speed, fan_percent);
+    }
+
+    if (gpu_fan_label) {
+        char fan_text[32];
+        snprintf(fan_text, sizeof(fan_text), "GPU Fan: %.1f%%", rx_packet.current_gpu_fan_speed);
+        aroma_label_set_text((AromaNode*)gpu_fan_label, fan_text);
+    }
+
+    // Update GPU Utilization
+    if (gpu_utilisation) {
+        float gpu_percent = rx_packet.current_gpu_utilisation / 100.0f;
+        aroma_progressbar_set_progress((AromaNode*)gpu_utilisation, gpu_percent);
+    }
+
+    if (gpu_util_label) {
+        char gpu_text[32];
+        snprintf(gpu_text, sizeof(gpu_text), "GPU Usage: %.1f%%", rx_packet.current_gpu_utilisation);
+        aroma_label_set_text((AromaNode*)gpu_util_label, gpu_text);
+    }
+
+    // Update timestamp and status
     if (timestamp_label) {
         char status_text[64];
         uint32_t seconds = rx_packet.timestamp / 1000;
@@ -182,8 +220,7 @@ void check_connection_status() {
 }
 
 void setup() {
-
-    Serial.begin(9600);  
+    Serial.begin(9600);
 
     aroma_ui_init();
 
@@ -193,13 +230,23 @@ void setup() {
     window = aroma_ui_create_window("System Monitor", WINDOW_WIDTH, WINDOW_HEIGHT);
     aroma_event_set_root((AromaNode*)window);
 
+    // Calculate positions for all widgets
     int cpu_label_y = calculateYPosition(0);
     int cpu_progress_y = cpu_label_y + LABEL_HEIGHT;
-    int ram_label_y = calculateYPosition(2); 
+    
+    int ram_label_y = calculateYPosition(1);
     int ram_progress_y = ram_label_y + LABEL_HEIGHT;
+    
+    int gpu_fan_label_y = calculateYPosition(2);
+    int gpu_fan_progress_y = gpu_fan_label_y + LABEL_HEIGHT;
+    
+    int gpu_util_label_y = calculateYPosition(3);
+    int gpu_util_progress_y = gpu_util_label_y + LABEL_HEIGHT;
+    
     int status_y = calculateYPosition(4);
     int timestamp_y = calculateYPosition(5);
 
+    // Create CPU widgets
     cpu_label = (AromaLabel*)aroma_label_create(
         (AromaNode*)window, 
         "CPU Usage: 0.0%", 
@@ -217,6 +264,7 @@ void setup() {
         PROGRESS_TYPE_DETERMINATE
     );
 
+    // Create RAM widgets
     ram_label = (AromaLabel*)aroma_label_create(
         (AromaNode*)window, 
         "RAM Usage: 0.0%", 
@@ -234,6 +282,43 @@ void setup() {
         PROGRESS_TYPE_DETERMINATE
     );
 
+    // Create GPU Fan Speed widgets
+    gpu_fan_label = (AromaLabel*)aroma_label_create(
+        (AromaNode*)window, 
+        "GPU Fan: 0.0%", 
+        MARGIN_X, 
+        gpu_fan_label_y, 
+        LABEL_STYLE_LABEL_LARGE
+    );
+
+    gpu_fan_speed = (AromaProgressBar*)aroma_progressbar_create(
+        (AromaNode*)window, 
+        MARGIN_X, 
+        gpu_fan_progress_y, 
+        WIDGET_WIDTH, 
+        PROGRESS_HEIGHT, 
+        PROGRESS_TYPE_DETERMINATE
+    );
+
+    // Create GPU Utilization widgets
+    gpu_util_label = (AromaLabel*)aroma_label_create(
+        (AromaNode*)window, 
+        "GPU Usage: 0.0%", 
+        MARGIN_X, 
+        gpu_util_label_y, 
+        LABEL_STYLE_LABEL_LARGE
+    );
+
+    gpu_utilisation = (AromaProgressBar*)aroma_progressbar_create(
+        (AromaNode*)window, 
+        MARGIN_X, 
+        gpu_util_progress_y, 
+        WIDGET_WIDTH, 
+        PROGRESS_HEIGHT, 
+        PROGRESS_TYPE_DETERMINATE
+    );
+
+    // Create status widgets
     status_label = (AromaLabel*)aroma_label_create(
         (AromaNode*)window, 
         "Status: Connecting...", 
@@ -257,17 +342,9 @@ void setup() {
 }
 
 void loop() {
-
     receive_packets();
-
     update_ui();
-
     //check_connection_status();
-
     aroma_ui_process_events();
-
     aroma_ui_render(window);
-
-    //delay(16); 
-
 }

@@ -36,11 +36,10 @@
 // this will save ~20kbytes of FLASH
 #define SMOOTH_FONT
 
-#define SPI_FREQUENCY  27000000 ///
+#define SPI_FREQUENCY        27000000UL   // 27 MHz
 
+// Optional reduced SPI frequency for reading from TFT (if needed for stability)
+#define SPI_READ_FREQUENCY   20000000UL   // 20 MHz
 
-// Optional reduced SPI frequency for reading TFT
-#define SPI_READ_FREQUENCY  20000000 ///
-
-// The XPT2046 requires a lower SPI clock rate of 2.5MHz so we define that here:
-#define SPI_TOUCH_FREQUENCY  2500000 //
+// SPI frequency for the XPT2046 touchscreen controller (must be low)
+#define SPI_TOUCH_FREQUENCY   2500000UL   // 2.5 MHz
